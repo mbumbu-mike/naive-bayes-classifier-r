@@ -1,0 +1,335 @@
+---
+title: "BAYESIAN CLASSIFIER ( Naïve Bayes Classifier
+ )"
+author: "MIKE MBUMBU"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+This project aims to develop a text classification model to detect spam messages using a Naïve Bayes classifier. The goal is to distinguish between ham and spam messages based on their textual content.
+
+### Objective
+- To summarize word patterns and sentiments for Ham and Spam messages.
+- To train and evaluate a Naive Bayes model for SMS classification.
+- To assess model performance both inside and outside the sample.
+
+## Workflow Overview
+
+1. Text Preprocessing (cleaning, stop word removal)
+2. Word Frequency Visualization (Word clouds & Bar plots)
+3. Class Balancing (ROSE package)
+4. Feature Engineering (DTM)
+5. Model Building (Naïve Bayes)
+6. Performance Evaluation (confusion matrices)
+
+## Preparation.
+- load all the required libraries.
+- Load data.
+- rename the columns for clarity.
+```{r, message=FALSE, warning=FALSE}
+library(textclean)
+library(dplyr)     
+library(tidyr) 
+library(RColorBrewer)
+library(ggplot2)   
+library(tm)          
+library(textclean)  
+library(caret)     
+library(e1071)       
+library(wordcloud)
+library(tidytext)
+library(caTools)
+
+data<- read.csv("C:/Users/mickey/Desktop/project_me/SMS DATA.csv")
+
+colnames(data) <- c("Label", "Message")
+data$Label<-as.factor(data$Label)
+data$Message <- as.character(data$Message)
+```
+
+## Text Preprocessing (cleaning, stopword removal)
+- we Ensure the text encoding is UTF-8 before applying transformations.
+- Replace urls with `<URL>`.
+- Convert all our messages to lowercase.
+- remove puctuation marks but keeping the ! its important.
+- Replace multiple spaces with a single space.
+- Remove leading/trailing spaces.
+```{r}
+data$Message <- iconv(data$Message, to = "UTF-8", sub = "")
+data$Message <- gsub("https?://\\S+|www\\.\\S+", "<URL>", data$Message)
+data$Message <- tolower(data$Message)
+data$Message <- gsub("[^[:alnum:] !]", "", data$Message)
+data$Message <- gsub("\\s+", " ", data$Message)
+data$Message <- trimws(data$Message)
+```
+
+### we now remove the stop words.
+- We remove the stop words together with the word call because it appears alot in ham and still in spam.
+
+```{r}
+# Create a corpus
+corpus <- VCorpus(VectorSource(data$Message))
+
+# Define stop words + custom ones like "call"
+custom_stopwords <- c(stopwords("en"), "call")
+
+# Remove them from the corpus
+corpus <- tm_map(corpus, removeWords, custom_stopwords)
+
+# Convert back to plain text and update the Message column
+data$Message <- sapply(corpus, as.character)
+```
+
+### We now tokenize the text(Message ) into individual words
+```{r}
+tokens <- data %>%
+  unnest_tokens(word, Message)
+```
+
+### Count words separately for Ham and Spam
+```{r}
+ham_counts <- tokens %>%
+  filter(Label == "ham") %>%
+  count(word, sort = TRUE)
+
+spam_counts <- tokens %>%
+  filter(Label == "spam") %>%
+  count(word, sort = TRUE)
+```
+
+### PLOT BAR GRAPHS FOR HAM & SPAM.
+```{r}
+ggplot(head(ham_counts, 30), aes(x = reorder(word, n), y = n)) +
+  geom_bar(stat = "identity", fill = "blue") +
+  coord_flip() +
+  labs(title = "Top 20 Words in Ham Messages", x = "Words", y = "Frequency")
+
+ggplot(head(spam_counts, 30), aes(x = reorder(word, n), y = n)) +
+  geom_bar(stat = "identity", fill = "red") +
+  coord_flip() +
+  labs(title = "Top 20 Words in Spam Messages", x = "Words", y = "Frequency")
+```
+
+### word cloud.
+```{r}
+# Word cloud for Ham messages (limit to top 100)
+wordcloud(words = ham_counts$word, 
+          freq = ham_counts$n,           # Frequencies of the words
+          max.words = 100,               # Limit the number of words
+          colors = "blue",               # Color scheme
+          scale = c(3, 0.5),             # Adjust the word size range
+          main = "Ham Word Cloud")       # Title
+
+# Word cloud for Spam messages (limit to top 100)
+wordcloud(words = spam_counts$word, 
+          freq = spam_counts$n,          # Frequencies of the words
+          max.words = 100,               # Limit the number of words
+          colors = "red",   
+          scale = c(3, 0.5),             # Adjust the word size range
+          main = "Spam Word Cloud")      # Title
+
+```
+
+### Analysis of Common Word Pairs (Bigrams) in Ham vs. Spam Messages.
+```{r}
+# Step 1: Generate bigrams
+bigrams_df_clean <- data %>%
+  unnest_tokens(bigram, Message, token = "ngrams", n = 2) %>%  # Create bigrams
+  separate(bigram, c("word1", "word2"), sep = " ")  # Separate into two columns
+
+# Step 2: Count the frequency of bigrams for Ham messages
+ham_bigrams <- bigrams_df_clean %>%
+  filter(Label == "ham") %>%
+  count(word1, word2, sort = TRUE) %>%
+  unite(bigram, word1, word2, sep = " ")  # Join the two words into a single column
+
+# Step 3: Count the frequency of bigrams for Spam messages
+spam_bigrams <- bigrams_df_clean %>%
+  filter(Label == "spam") %>%
+  count(word1, word2, sort = TRUE) %>%
+  unite(bigram, word1, word2, sep = " ")  # Join the two words into a single column
+
+# Step 4: Create the bar plot for top bigrams in Ham messages
+ggplot(head(ham_bigrams, 20), aes(x = reorder(bigram, n), y = n)) +
+  geom_bar(stat = "identity", fill = "blue") +
+  coord_flip() +
+  labs(title = "Top 20 Bigrams in Ham Messages", x = "Bigrams", y = "Frequency")
+
+# Step 5: Create the bar plot for top bigrams in Spam messages
+ggplot(head(spam_bigrams, 20), aes(x = reorder(bigram, n), y = n)) +
+  geom_bar(stat = "identity", fill = "red") +
+  coord_flip() +
+  labs(title = "Top 20 Bigrams in Spam Messages", x = "Bigrams", y = "Frequency")
+```
+
+The word clouds visually represent the most common words in spam and ham messages.
+- <u>Ham( BLUE ).</u>
+- Common words:- good, home, love, time, day, now, going, go.... this words reflect everydays interaction and       personal discussions.
+- when we look at the bigram we see the common word pairs:- are you, i am, have a, do you, want to i was The bigrams highlight typical conversational patterns, with some pairs possibly indicating personal interaction (like "i am" or "are you") and others suggesting offers or engagements (like "have a" or "i was").
+- Conclusion: Ham messages are more natural and conversational, focusing on daily communication.
+
+- <u>Spam( RED ).</u>
+- Common words:"free","won","reply","cash","prize","win","urgent","claim","stop","awarded","draw","recieve","won","please","mobile",    "stop", "urgent", "cash," ,"customer"...  
+- These words suggest advertising, giveaways, and persuasive tactics (e.g., offering rewards, pushing immediate       action), typical of spam.    
+- The frequent use of words like "urgent," "claim," and "stop" indicates an attempt to prompt a quick response from   the recipient.
+- when we look at the bigram we see the common word pairs:- have won, your mobile,to claim, please call, won a, t contact, cash or ... These bigrams words indicate the scammy or promotional nature of the messages, using phrases like "have won," "please call," and "to claim" to create a sense of urgency and exploit the recipient's emotions (e.g., excitement about winning).
+
+- spam messages use marketing- heavy words to push offers while ham messages use friendly language without            commercial  intent. filtering spams we could use words like "win", "free", "prize", "urgent".
+- These visual summaries not only help understand the contextual usage of words but also support the classification    task, making it easier to distinguish between the two types of messages based on language patterns.
+
+
+## Class balancing.
+- because we are working with data that has a class imbalance (approximately 86% ham and 14% spam) we'll have to balance it first then move to the other modelling steps.
+- Will do class balancing using ROSE [ROSE balances your class distribution by generating synthetic samples for the under-represented class].
+```{r}
+library(ROSE)
+data_balanced <- ovun.sample(Label ~ ., data = data, method = "both",seed = 12, N = 2 * table(data$Label)[1])$data
+
+# Check the new class distribution
+table(data_balanced$Label)
+```
+
+### The new dimmension of our data.
+```{r}
+dim(data_balanced)
+```
+
+## Feature Engineering (DTM) 
+- Data Splitting.
+- Creating Corpus.
+- Document-Term Matrix (DTM).
+- Removing Sparse Terms.
+
+### Split the data first into training and testing set.
+- We will do that step at this point to avaoid data leakages.
+- Split data Into training (80%) and testing (20%).
+```{r}
+set.seed(1234)
+train_index <- createDataPartition(data_balanced$Label, p = 0.8, list = FALSE)
+
+
+# Split predictors
+train_data <- data_balanced[train_index, ]
+test_data <- data_balanced[-train_index, ]
+```
+
+### We now create DTM for Training and Testing Sets.
+- create a corpus (corpus is a collection of text messages.)
+```{r}
+corpus_train <- VCorpus(VectorSource(train_data$Message))
+corpus_test <- VCorpus(VectorSource(test_data$Message))
+```
+- Create a dtm.
+```{r}
+combined_corpus <- c(corpus_train, corpus_test)
+combined_dtm <- DocumentTermMatrix(combined_corpus)
+#Remove sparce Terms.
+# Now you can create dtm_train and dtm_test from this combined DTM to ensure consistency.
+dtm_train <- combined_dtm[1:length(corpus_train),]
+dtm_test <- combined_dtm[(length(corpus_train) + 1):length(combined_corpus),]
+```
+
+- reduce the dimensionality of the DTM and remove terms that don’t appear often.
+```{r}
+dtm_train <- removeSparseTerms(dtm_train, 0.99)  # Remove terms that appear in less than 1% of the documents
+dtm_test <- removeSparseTerms(dtm_test, 0.99)
+
+```
+
+- Convert the DTM to a matrix and then a data frame
+```{r}
+dtm_train_matrix <- as.matrix(dtm_train)
+dtm_test_matrix <- as.matrix(dtm_test)
+dtm_train_df <- as.data.frame(dtm_train_matrix)
+dtm_test_df <- as.data.frame(dtm_test_matrix)
+```
+
+- we now get out final training and testing data.
+```{r}
+train_x <-dtm_train_df
+train_y <-as.factor (train_data$Label)
+test_x <-dtm_test_df
+test_y <-as.factor(test_data$Label)
+```
+
+### train and test data dimmensions.
+```{r}
+```{r}
+dim(train_x)
+dim(test_x)
+
+```
+
+## Model Building (Naïve Bayes).
+```{r}
+nb_model <- naiveBayes(x = train_x, y = train_y, laplace=3)
+```
+
+## model performance insample sample
+```{r}
+# Predicting on training data (in-sample evaluation)
+nb_train_predictions <- predict(nb_model, train_x)
+# Create a confusion matrix
+conf_matrix1 <- confusionMatrix(nb_train_predictions, train_y)
+# Print the confusion matrix
+print(conf_matrix1)
+```
+
+### Plot the Confusion Matrix
+```{r}
+# Extract the confusion matrix from caret.
+cm_table <- conf_matrix1$table
+
+# Ensure it's a 2x2 matrix
+cm_matrix <- as.matrix(cm_table)
+
+# Now plot the confusion matrix using fourfoldplot
+fourfoldplot(cm_matrix, color = c("darkgreen", "orange"), conf.level = 0, main = "Confusion Matrix")
+
+```
+
+The model achieved a strong in-sample accuracy of 83.98%, with a 95% confidence interval ranging from 83.14% to 84.79%, showing reliable performance. It significantly outperforms the baseline accuracy of always predicting the majority class (50.36%), with a p-value < 2.2e-16. The Kappa score of 0.6802 indicates substantial agreement beyond chance. It performs very well in identifying ham messages (sensitivity: 97.99%) and reasonably well in detecting spam (specificity: 70.16%), resulting in a balanced accuracy of 83.98%.
+
+
+## model performance out sample
+```{r,warning = FALSE}
+# Make predictions on the test data (out-of-sample evaluation)
+predictions_test <- predict(nb_model, test_x)
+# Create confusion matrix for the test data
+conf_matrix2<- confusionMatrix(predictions_test, test_y)
+# Print the confusion matrix
+print(conf_matrix2)
+```
+
+### Plot the Confusion Matrix
+```{r}
+# Extract the confusion matrix from caret (it’s usually in the form of a table)
+cm_table <- conf_matrix2$table
+
+# Ensure it's a 2x2 matrix
+cm_matrix <- as.matrix(cm_table)
+
+# Now plot the confusion matrix using fourfoldplot
+fourfoldplot(cm_matrix, color = c("darkgreen", "orange"), conf.level = 0, main = "Confusion Matrix")
+```
+
+The model maintained strong performance in the out-of-sample evaluation, achieving an accuracy of 83.73% with a 95% confidence interval of (82.01%, 85.35%), indicating consistent generalization to new data. The accuracy is significantly better than the No Information Rate (50.36%), with a p-value < 2.2e-16. The Kappa value of 0.6753 reflects substantial agreement beyond chance. The model shows high sensitivity (97.70%) for identifying ham and reasonable specificity (69.96 %) for detecting spam, resulting in a balanced accuracy of 83.73%, confirming its effectiveness across both classes.
+
+### dictionary information.
+During data cleaning, a predefined stop words dictionary (such as the one in the tm package in R) is used to filter out common, irrelevant words like "the" or "and." After removing these stop words, the remaining words form the vocabulary, which the Naïve Bayes classifier then uses to predict the class of new documents.
+
+
+## conclussion
+In conclusion, our analysis successfully built and evaluated a Naïve Bayes classifier for spam detection using text message data. After balancing the dataset and applying proper preprocessing, the model demonstrated strong performance both in-sample and out-of-sample, achieving accuracies above 83% with narrow confidence intervals. The high sensitivity and balanced accuracy indicate that the model effectively distinguishes between ham and spam messages. Overall, the results highlight that Naïve Bayes is a reliable and interpretable approach for text classification tasks such as spam detection.
+
+
+
+
+
+
+
